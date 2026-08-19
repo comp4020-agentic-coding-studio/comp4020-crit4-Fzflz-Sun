@@ -77,6 +77,30 @@ built from the same string data, so the instrument is never blank.
    Verified with a Playwright context set to `reducedMotion: 'reduce'`: the
    class applies, and ripple elements still appear and fully clean up.
 
+5. **Finding the string-occlusion bug required computing world-space
+   coordinates, not reading the code.** After feedback that the 3D model
+   looked wrong and had visible clipping, I fixed the obvious issues by
+   arithmetic first — string endpoints swept 1.55 units across x while the
+   soundbox is only ~0.7 units wide, so treble strings floated in empty
+   space; string tops sat exactly on the neck tube's centreline, which is
+   *inside* the tube's own radius. Both fixes looked complete on paper. A
+   screenshot showed otherwise: every string still visibly vanished partway
+   down before reaching the box. The cause wasn't in either fix — it was
+   that the string's bottom point attached to the soundbox's back
+   (`ExtrudeGeometry`'s local z = 0 face), while the default camera sits on
+   the box's *front* side, so the box's own solid volume sat between the
+   camera and most of each string. I only found this by computing the
+   camera's actual world position from its orbit angles and comparing it
+   against which of the box's two flat extrude faces points toward it —
+   reading `harp3d.ts` alone never would have surfaced it, because nothing
+   in the code is wrong in isolation; it's only wrong relative to which side
+   the camera happens to default to
+   ([`43eba35`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/43eba35)).
+   I confirmed it with Playwright screenshots at three orbit angles, actually
+   looking at the rendered PNGs rather than assuming the arithmetic fix was
+   sufficient — which is also how the flat-black-silhouette lighting issue
+   in the same commit was caught.
+
 ## How this was actually organised
 
 The five commits above split the work by module/concern (audio+data, songs,
