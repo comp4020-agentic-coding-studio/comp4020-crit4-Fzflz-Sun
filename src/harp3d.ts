@@ -22,6 +22,58 @@ const WOOD = 0x5b3a29;
 const WOOD_DARK = 0x3d2718;
 const BRASS = 0xb08d57;
 
+/** A subtle painted-on grain so the wood isn't a flat, plasticky colour. */
+function createWoodGrainTexture(): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 46; i++) {
+      const x = Math.random() * size;
+      ctx.strokeStyle = `rgba(20,12,5,${(0.08 + Math.random() * 0.22).toFixed(3)})`;
+      ctx.lineWidth = 0.5 + Math.random() * 1.8;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + (Math.random() - 0.5) * 10, size);
+      ctx.stroke();
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2, 5);
+  return texture;
+}
+
+/** A soft warm glow under the harp so it reads as standing on a lit floor, not floating in a void. */
+function createGroundGlow(): THREE.Mesh {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, "rgba(120,80,35,0.4)");
+    gradient.addColorStop(0.6, "rgba(120,80,35,0.14)");
+    gradient.addColorStop(1, "rgba(120,80,35,0)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.2, 4.2),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }),
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = -1.79;
+  return mesh;
+}
+
 const MIN_POLAR = Math.PI * 0.34;
 const MAX_POLAR = Math.PI * 0.6;
 const MIN_RADIUS = 3.2;
@@ -70,25 +122,44 @@ export function mountHarp3D(
   const key = new THREE.DirectionalLight(0xfff1d6, 1.6);
   key.position.set(2.5, 4, 3);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0xbcd0ff, 0.4);
+  const fill = new THREE.DirectionalLight(0xbcd0ff, 0.5);
   fill.position.set(-3, 1, -2);
   scene.add(fill);
-  scene.add(new THREE.AmbientLight(0x554433, 0.55));
+  const rim = new THREE.DirectionalLight(0xffcf9e, 0.35);
+  rim.position.set(-1, 2, -4);
+  scene.add(rim);
+  scene.add(new THREE.AmbientLight(0x554433, 0.72));
 
   const harpGroup = new THREE.Group();
   scene.add(harpGroup);
+  harpGroup.add(createGroundGlow());
 
-  // Soundbox: a tapered box standing upright, wide at the base.
+  const grain = createWoodGrainTexture();
+  const woodMat = new THREE.MeshStandardMaterial({ color: WOOD, roughness: 0.6, metalness: 0.04, map: grain });
+  const woodDarkMat = new THREE.MeshStandardMaterial({ color: WOOD_DARK, roughness: 0.55, metalness: 0.04, map: grain });
+
+  // Soundbox: a tapered, gently-bellied box standing upright, wide at the
+  // base and narrow at the top, like a real harp's soundboard profile.
   const boxShape = new THREE.Shape();
-  boxShape.moveTo(-0.34, 0);
-  boxShape.lineTo(0.34, 0);
+  boxShape.moveTo(-0.38, 0);
+  boxShape.bezierCurveTo(-0.52, 0.6, -0.34, 1.7, -0.22, 2.6);
   boxShape.lineTo(0.22, 2.6);
-  boxShape.lineTo(-0.22, 2.6);
+  boxShape.bezierCurveTo(0.34, 1.7, 0.52, 0.6, 0.38, 0);
   boxShape.closePath();
-  const soundbox = new THREE.Mesh(
-    new THREE.ExtrudeGeometry(boxShape, { depth: 0.5, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 2 }),
-    new THREE.MeshStandardMaterial({ color: WOOD, roughness: 0.55, metalness: 0.05 }),
-  );
+  const boxGeo = new THREE.ExtrudeGeometry(boxShape, { depth: 0.5, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 3, curveSegments: 16 });
+  // Taper the resonating chamber's depth — deep at the base, shallow near the
+  // neck — instead of a uniform-depth slab. The front face (local z = 0.5,
+  // the one the strings attach to) is held fixed at every height; only the
+  // back face is pulled forward, so this can't open a gap under the strings.
+  const boxPos = boxGeo.attributes.position;
+  for (let i = 0; i < boxPos.count; i++) {
+    const y = boxPos.getY(i);
+    const depthScale = 1 - (Math.min(Math.max(y, 0), 2.6) / 2.6) * 0.55;
+    boxPos.setZ(i, 0.5 - (0.5 - boxPos.getZ(i)) * depthScale);
+  }
+  boxPos.needsUpdate = true;
+  boxGeo.computeVertexNormals();
+  const soundbox = new THREE.Mesh(boxGeo, woodMat);
   soundbox.position.set(0.55, -1.3, -0.25);
   soundbox.rotation.y = -0.08;
   harpGroup.add(soundbox);
@@ -100,41 +171,39 @@ export function mountHarp3D(
     new THREE.Vector3(-0.55, 1.95, 0.15),
     new THREE.Vector3(-1.35, 1.7, 0.1),
   ]);
-  const neck = new THREE.Mesh(
-    new THREE.TubeGeometry(neckCurve, 32, 0.09, 12, false),
-    new THREE.MeshStandardMaterial({ color: WOOD_DARK, roughness: 0.5 }),
-  );
+  const neck = new THREE.Mesh(new THREE.TubeGeometry(neckCurve, 32, 0.09, 14, false), woodDarkMat);
   harpGroup.add(neck);
 
-  // Forepillar: from the base up to the neck's far end.
+  // Forepillar: from the base up to the neck's far end — the last control
+  // point matches the neck curve's endpoint exactly, so the two tubes meet
+  // with no visible gap or kink (the brass cap below then hides the seam).
   const pillarCurve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(-1.4, -1.55, 0.3),
     new THREE.Vector3(-1.5, 0, 0.2),
-    new THREE.Vector3(-1.35, 1.65, 0.1),
+    new THREE.Vector3(-1.35, 1.7, 0.1),
   ]);
-  const pillar = new THREE.Mesh(
-    new THREE.TubeGeometry(pillarCurve, 24, 0.1, 12, false),
-    new THREE.MeshStandardMaterial({ color: WOOD, roughness: 0.55 }),
-  );
+  const pillar = new THREE.Mesh(new THREE.TubeGeometry(pillarCurve, 24, 0.1, 14, false), woodMat);
   harpGroup.add(pillar);
 
-  // Base plinth joining soundbox and pillar.
-  const base = new THREE.Mesh(
-    new THREE.BoxGeometry(2.1, 0.16, 0.55),
-    new THREE.MeshStandardMaterial({ color: WOOD_DARK, roughness: 0.6 }),
-  );
-  base.position.set(-0.4, -1.62, 0.05);
+  // Base plinth, sized and positioned to actually overlap both the
+  // soundbox's bottom and the pillar's foot (rather than leaving a gap
+  // under either), so it reads as one joined body.
+  const base = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.5, 0.6), woodDarkMat);
+  base.position.set(-0.3, -1.5, 0.05);
   harpGroup.add(base);
 
-  // Brass cap and a couple of decorative rings.
+  // Brass cap over the neck/pillar joint, and two rings banding the pillar,
+  // each oriented to the pillar's own tangent at that point so they wrap
+  // cleanly around the curved tube instead of cutting through it at an angle.
   const brassMat = new THREE.MeshStandardMaterial({ color: BRASS, roughness: 0.3, metalness: 0.75 });
   const cap = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 12), brassMat);
   cap.position.copy(neckCurve.getPoint(1));
   harpGroup.add(cap);
+  const ringAxis = new THREE.Vector3(0, 0, 1);
   for (const t of [0.15, 0.85]) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.02, 8, 20), brassMat);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 10, 24), brassMat);
     ring.position.copy(pillarCurve.getPoint(t));
-    ring.rotation.x = Math.PI / 2;
+    ring.quaternion.setFromUnitVectors(ringAxis, pillarCurve.getTangent(t));
     harpGroup.add(ring);
   }
 
@@ -146,12 +215,18 @@ export function mountHarp3D(
 
   for (const config of STRINGS) {
     const t = config.position; // 0 (bass) .. 1 (treble)
-    const topPoint = neckCurve.getPoint(0.08 + t * 0.86);
-    const bottomPoint = new THREE.Vector3(
-      0.55 - t * 1.55,
-      -1.25 + t * 0.05,
-      -0.24 + t * 0.02,
-    );
+    // The neck point is the tube's centreline, so pull the attachment down
+    // and slightly forward, off the tube's surface — otherwise the string's
+    // top end would render buried inside the wood.
+    const topPoint = neckCurve.getPoint(0.08 + t * 0.86).add(new THREE.Vector3(0, -0.12, 0.16));
+    // Runs almost the full height of the soundbox's front face, near its
+    // centreline (which the box's taper keeps within the surface at every
+    // height) — bass strings (t=0) attach low and are long, treble (t=1)
+    // attach high near the neck and are short, same as a real harp. z sits
+    // just outside the box's camera-facing surface (local z = depth, world
+    // 0.25) — attaching to the far face instead would let the box's own
+    // solid volume occlude most of each string's length.
+    const bottomPoint = new THREE.Vector3(0.55, -1.15 + t * 2.2, 0.27);
     const length = topPoint.distanceTo(bottomPoint);
     const radiusVisual = 0.012 - t * 0.005;
 
