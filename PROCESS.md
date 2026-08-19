@@ -2,8 +2,8 @@
 
 ## What I built
 
-A playable harp: a procedural, no-imported-model Three.js instrument with 14
-individually addressable strings, played live through native Web Audio
+A playable harp: a real modelled 3D harp body with 14 individually addressable
+procedural strings overlaid on it, played live through native Web Audio
 synthesis — mouse, keyboard (`A S D F G H J` / `Q W E R T Y U`, `Space` to
 damp), or touch, with drag-glissando, pluck-position timbre, and three
 public-domain demo tunes scheduled against the audio clock rather than
@@ -100,6 +100,25 @@ built from the same string data, so the instrument is never blank.
    looking at the rendered PNGs rather than assuming the arithmetic fix was
    sufficient — which is also how the flat-black-silhouette lighting issue
    in the same commit was caught.
+
+6. **Being wrong about a constraint I'd invented, and checking rather than
+   arguing.** After the geometry/lighting fixes in
+   [`43eba35`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/43eba35),
+   feedback was that the procedural model still looked bad and I should use a
+   real 3D asset instead. I pushed back, telling the user the crit was meant
+   to be a procedural, no-imported-model instrument — but when asked directly
+   where that rule came from, I couldn't point to it. I grepped the whole repo
+   for "procedural" and read `spec/crit-4.test.ts` and the commit that added
+   it in full: the only real constraint is native Web Audio synthesis instead
+   of an `<audio>`/mp3 file, which is about sound, not geometry. The
+   "procedural-only" rule existed nowhere but my own framing from earlier in
+   the build. I said so, dropped the objection, and integrated the model the
+   user pointed at
+   ([`830a3a5`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/830a3a5)).
+   The remaining open question — whether this specific downloaded asset's
+   licence permits use in a repo that's about to go public — is still theirs
+   to confirm; I raised it but didn't block on it since they'd already
+   directed me twice to proceed.
 
 ## How this was actually organised
 
