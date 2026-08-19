@@ -3,17 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>COMP4020 prototype</title>
+    <title>An instrument — the harp</title>
     <meta
       name="description"
-      content="Replace this with one sentence saying what this page is. A search result and a link preview both show it."
+      content="A live, playable harp built from the Web Audio API. Pluck a string with your mouse, keyboard or a touchscreen — no two players sound the same."
     />
 
-    <!--
-      The link-preview card: public/card.png, 1200x630 --- replace it. The URL
-      resolves against this page, like any link. No og:title/og:description:
-      scrapers fall back to the <title> and description above.
-    -->
     <meta property="og:type" content="website" />
     <meta property="og:image" content="./card.png" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -27,11 +22,200 @@
       </nav>
     </header>
     <main>
-      <h1>COMP4020 prototype</h1>
-      <p data-testid="intro">
-        Replace this with your prototype. This week's brief is on the course website;
-        <code>spec/README.md</code> explains how the checks in this repo relate to it.
-      </p>
+      <section id="stage" class="hero" aria-label="Play the harp">
+        <div class="hero-grid">
+          <aside class="instructions-panel">
+            <h1 class="page-title">An instrument</h1>
+            <p class="invite" data-testid="invite">Press A, or pluck a string.</p>
+            <p class="hint">
+              Mouse, keyboard, or touch — whatever you've got a hand free for. Drag
+              empty space on the frame to look around.
+            </p>
+          </aside>
+
+          <div class="harp-stage" id="harp-stage" data-testid="instrument">
+            <div id="harp-3d-container" class="harp-3d-container"></div>
+            <button id="reset-view" class="reset-view-btn" type="button">Reset view</button>
+          </div>
+
+          <aside class="controls-panel">
+            <section class="keyboard-map" aria-label="Keys and strings">
+              <h2>Keys</h2>
+              <div id="key-buttons" class="key-buttons">
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="C4" style="--string-color: #8c2f39" aria-label="Pluck C4, key A"><span class="key-label">A</span><span class="note-label">C4</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="D4" style="--string-color: #e9ddc0" aria-label="Pluck D4, key S"><span class="key-label">S</span><span class="note-label">D4</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="E4" style="--string-color: #e9ddc0" aria-label="Pluck E4, key D"><span class="key-label">D</span><span class="note-label">E4</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="F4" style="--string-color: #1f3a5f" aria-label="Pluck F4, key F"><span class="key-label">F</span><span class="note-label">F4</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="G4" style="--string-color: #e9ddc0" aria-label="Pluck G4, key G"><span class="key-label">G</span><span class="note-label">G4</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="A4" style="--string-color: #e9ddc0" aria-label="Pluck A4, key H"><span class="key-label">H</span><span class="note-label">A4</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="B4" style="--string-color: #e9ddc0" aria-label="Pluck B4, key J"><span class="key-label">J</span><span class="note-label">B4</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="C5" style="--string-color: #8c2f39" aria-label="Pluck C5, key Q"><span class="key-label">Q</span><span class="note-label">C5</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="D5" style="--string-color: #e9ddc0" aria-label="Pluck D5, key W"><span class="key-label">W</span><span class="note-label">D5</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="E5" style="--string-color: #e9ddc0" aria-label="Pluck E5, key E"><span class="key-label">E</span><span class="note-label">E5</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="F5" style="--string-color: #1f3a5f" aria-label="Pluck F5, key R"><span class="key-label">R</span><span class="note-label">F5</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="G5" style="--string-color: #e9ddc0" aria-label="Pluck G5, key T"><span class="key-label">T</span><span class="note-label">G5</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="A5" style="--string-color: #e9ddc0" aria-label="Pluck A5, key Y"><span class="key-label">Y</span><span class="note-label">A5</span></button>
+                <button type="button" class="key-button" data-testid="play-target" data-string-id="B5" style="--string-color: #e9ddc0" aria-label="Pluck B5, key U"><span class="key-label">U</span><span class="note-label">B5</span></button>
+              </div>
+              <p class="hint hint-small">Space damps every ringing string.</p>
+            </section>
+
+            <section class="volume-controls" aria-label="Volume and stopping">
+              <label for="volume">Volume</label>
+              <input type="range" id="volume" min="0" max="1" step="0.01" value="0.8" />
+              <div class="button-row">
+                <button id="mute-btn" type="button" aria-pressed="false">Mute</button>
+                <button id="damp-btn" type="button">Damp all strings</button>
+              </div>
+            </section>
+
+            <section class="song-controls" aria-label="Demo tunes">
+              <h2>Demo tunes</h2>
+              <div id="song-list" class="song-list"></div>
+              <div class="button-row">
+                <button id="song-play" type="button">Play</button>
+                <button id="song-stop" type="button">Stop</button>
+              </div>
+              <div class="song-progress" aria-hidden="true">
+                <div id="song-progress-bar" class="song-progress-bar"></div>
+              </div>
+              <p id="song-status" class="visually-hidden" role="status" aria-live="polite"></p>
+            </section>
+          </aside>
+        </div>
+
+        <a href="#culture" class="scroll-hint">The harp's story ↓</a>
+      </section>
+
+      <section id="culture" class="culture" aria-label="About the harp">
+        <h2>A short history of the harp</h2>
+
+        <p>
+          The harp is one of the oldest instrument families still played today.
+          Arched, bow-shaped harps appear in Egyptian and West and Central
+          African depictions from as early as 3000–4000 BCE, played resting
+          against the shoulder. A second ancient form, the angular harp — two
+          crosspieces at right angles, strings stretched between them — arose
+          separately in Assyria and also spread through Egypt and Greece.
+        </p>
+
+        <h3>The medieval frame harp</h3>
+        <p>
+          The <strong>frame harp</strong> — a triangular structure with a
+          forepillar closing the frame around the strings, the shape this page's
+          instrument borrows — appears in Europe by the 9th century and in
+          Ireland by the 8th, though where exactly it originated is still
+          debated: possibly brought north by migrating Celtic peoples, possibly
+          developed independently. It became central to Celtic musical culture,
+          strung with wire and tuned diatonically, seven notes to the octave.
+          By the late 14th century a slimmer, straighter-pillared "Gothic harp"
+          had displaced the earlier form on the European continent and was
+          strung with gut by around 1500 — the design that eventually split
+          into the Irish <em>clairseach</em> on one branch and the modern
+          orchestral harp on the other.
+        </p>
+
+        <h3>The pedal harp</h3>
+        <p>
+          A diatonic harp can only play the notes it's tuned to. From the early
+          18th century, makers raced to fix that: hook mechanisms in the
+          soundbox, worked by foot pedals, could sharpen a string's pitch on
+          demand. Early hooks were fussy and prone to buzzing; over the century
+          they were refined into paired levers called <em>béquilles</em>. The
+          instrument in its modern form — the double-action pedal harp, with
+          seven pedals each able to raise a string by a semitone or a tone —
+          was perfected by Sébastien Érard in the early 19th century, and is
+          essentially what you'd see in an orchestra today.
+        </p>
+
+        <h3>Modern harps: pedals, levers and electricity</h3>
+        <p>
+          Alongside the orchestral pedal harp, smaller <strong>lever harps</strong>
+          (sometimes called folk or Celtic harps) use a hand-flipped lever at
+          the top of each string instead of a pedal system — lighter, cheaper,
+          and closer in spirit to the medieval instrument. Both kinds now also
+          come in electric and electro-acoustic versions, with piezo pickups
+          feeding an amplifier or effects chain, the harp's equivalent of the
+          electric guitar's journey from its acoustic ancestor.
+        </p>
+
+        <h3>Harp traditions beyond Europe</h3>
+        <p>
+          The harp's story is not a single European line. In West Africa, the
+          <strong>kora</strong> — a 21-string harp-lute with a calabash body,
+          central to the Mandé <em>jeliya</em> tradition of griot praise-singing
+          and oral history — has been documented since at least the 13th-century
+          Mali Empire. Ethiopia and Eritrea's <strong>krar</strong> and
+          <strong>beguena</strong>, and Uganda's <strong>ennanga</strong>, are
+          part of a wider family of African harps and harp-lyres used for court
+          praise, storytelling and devotion for centuries. In South America,
+          Spanish colonists brought European harps to Paraguay and the Andes in
+          the 16th century; Paraguayan luthiers made the instrument their own,
+          and the <strong>arpa paraguaya</strong> is now the country's national
+          instrument, carried worldwide by touring Paraguayan harpists since the
+          mid-20th century.
+        </p>
+
+        <h3>How this harp is built</h3>
+        <p>
+          A harp has a <strong>soundbox</strong> (the resonating body the
+          strings' vibration is amplified through), a <strong>neck</strong>
+          (the curved beam the strings attach to at their upper end), a
+          <strong>forepillar</strong> (the column bracing the neck against the
+          string tension — without it the frame would fold under the pull of
+          a full set of strings), and the <strong>strings</strong> themselves,
+          running the length between neck and soundbox. Pedal harps add
+          pedals in the base and mechanical linkages through the pillar; lever
+          harps put a small lever at each string's top instead.
+        </p>
+        <p>
+          Harpists rarely count strings while playing — with anywhere from 22
+          to 47 of them, that's not practical mid-piece. Instead, by the 18th
+          century it became standard to colour every <strong>C</strong> string
+          red and every <strong>F</strong> string black or dark blue (the
+          bright colours also read well under stage lighting), leaving every
+          other string its natural pale colour. A glance at the nearest red or
+          blue string tells a harpist exactly where they are. This page follows
+          that same convention — look for it in the 3D harp and the key panel.
+        </p>
+
+        <button id="back-to-harp" class="back-to-harp" type="button">
+          Back to the harp
+        </button>
+
+        <h3>Sources</h3>
+        <ul class="sources">
+          <li>
+            <a href="https://www.britannica.com/art/harp-musical-instrument" target="_blank" rel="noopener">
+              Britannica — "Harp: Description, History and Facts"
+            </a>
+          </li>
+          <li>
+            <a href="https://www.britannica.com/art/frame-harp" target="_blank" rel="noopener">
+              Britannica — "Frame harp"
+            </a>
+          </li>
+          <li>
+            <a
+              href="https://manufacturing.dustystrings.com/harps/about-harps/strings-tuning"
+              target="_blank"
+              rel="noopener"
+            >
+              Dusty Strings — "Harp Strings & Tuning"
+            </a>
+          </li>
+          <li>
+            <a href="https://pan-african-music.com/en/survey-of-african-harps/" target="_blank" rel="noopener">
+              Pan African Music — "A brief survey of African harps: the kora, krar, adungu and more"
+            </a>
+          </li>
+          <li>
+            <a href="https://en.wikipedia.org/wiki/Paraguayan_harp" target="_blank" rel="noopener">
+              Wikipedia — "Paraguayan harp"
+            </a>
+          </li>
+        </ul>
+      </section>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

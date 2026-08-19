@@ -1,16 +1,570 @@
-body {
-  margin: 0;
-  padding: 2rem;
-  font-family: system-ui, sans-serif;
-  line-height: 1.6;
-  color: #1a1a1a;
+/* ---------------------------------------------------------------------
+   An instrument — the harp
+   Palette: parchment cream, walnut brown, burgundy, aged gold, deep blue.
+   Quiet "instrument museum" mood — no neon, no glassmorphism, no HUD.
+--------------------------------------------------------------------- */
+
+@font-face {
+  font-family: system-serif;
+  src: local("Iowan Old Style"), local("Palatino Linotype"), local("Georgia");
 }
 
-main {
-  max-width: 40rem;
-  margin: 0 auto;
+:root {
+  --parchment: #f3ead9;
+  --parchment-dim: #e9dcc2;
+  --walnut: #4a3524;
+  --walnut-dark: #2e2015;
+  --burgundy: #6d2532;
+  --gold: #b08d3e;
+  --gold-bright: #cda54a;
+  --deep-blue: #1f3a5f;
+  --ink: #2a2018;
+  --paper-line: rgb(74 53 36 / 18%);
+  --serif: "Iowan Old Style", "Palatino Linotype", palatino, georgia, "Times New Roman", serif;
+  --sans: -apple-system, blinkmacsystemfont, "Segoe UI", roboto, sans-serif;
+  --focus-ring: 0 0 0 3px rgb(176 141 62 / 55%);
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at top, rgb(255 255 255 / 25%), transparent 60%),
+    var(--parchment);
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--sans);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* Subtle paper texture without any external image asset. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.5;
+  background-image:
+    repeating-linear-gradient(0deg, rgb(74 53 36 / 1.5%) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgb(74 53 36 / 1.2%) 0 1px, transparent 1px 3px);
 }
 
 a {
-  color: #0b5fff;
+  color: var(--burgundy);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--serif);
+  font-weight: 600;
+  color: var(--walnut-dark);
+  letter-spacing: 0.01em;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+header {
+  position: relative;
+  z-index: 2;
+  padding: 0.75rem 1.5rem;
+}
+
+header nav a {
+  font-family: var(--serif);
+  text-decoration: none;
+  font-size: 0.95rem;
+  color: var(--walnut);
+}
+
+/* ---------------------------------------------------------------------
+   Hero / stage
+--------------------------------------------------------------------- */
+
+.hero {
+  position: relative;
+  min-height: 100svh;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 1.5rem clamp(1rem, 4vw, 3rem) 3rem;
+  z-index: 1;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.6fr) minmax(0, 0.95fr);
+  gap: clamp(1rem, 3vw, 2.5rem);
+  align-items: center;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.instructions-panel,
+.controls-panel {
+  font-family: var(--sans);
+}
+
+.instructions-panel {
+  padding-top: 1rem;
+}
+
+.page-title {
+  font-size: clamp(1.3rem, 2vw, 1.7rem);
+  margin: 0 0 1.25rem;
+  opacity: 0.92;
+}
+
+.invite {
+  font-family: var(--serif);
+  font-size: clamp(1.1rem, 1.6vw, 1.4rem);
+  color: var(--walnut-dark);
+  margin: 0 0 0.75rem;
+  transition: opacity 0.8s ease;
+}
+
+body.has-played .invite {
+  opacity: 0;
+}
+
+.hint {
+  font-size: 0.92rem;
+  color: var(--walnut);
+  opacity: 0.85;
+  max-width: 28ch;
+}
+
+.hint-small {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+/* ---------------------------------------------------------------------
+   The harp stage
+--------------------------------------------------------------------- */
+
+.harp-stage {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  max-height: 78vh;
+  border-radius: 18px;
+  background:
+    radial-gradient(ellipse at 50% 20%, rgb(255 244 214 / 55%), transparent 65%),
+    linear-gradient(180deg, #efe4cf 0%, #e3d3af 60%, #d8c496 100%);
+  box-shadow:
+    inset 0 0 0 1px var(--paper-line),
+    0 20px 50px -25px rgb(46 32 21 / 45%);
+  overflow: hidden;
+  touch-action: pan-y;
+}
+
+.harp-3d-container {
+  position: absolute;
+  inset: 0;
+}
+
+.harp-3d-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  touch-action: pan-y;
+}
+
+.reset-view-btn {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 2;
+}
+
+.harp-stage.no-webgl {
+  aspect-ratio: auto;
+  max-height: none;
+  padding: 1rem 0.5rem;
+}
+
+.svg-harp {
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  display: block;
+  margin: 0 auto;
+  overflow: visible;
+}
+
+.svg-harp-frame {
+  fill: var(--walnut);
+  opacity: 0.9;
+}
+
+.svg-string {
+  cursor: pointer;
+}
+
+.svg-string-hit {
+  stroke: transparent;
+  stroke-width: 16;
+}
+
+.svg-string-visual {
+  stroke-width: 2;
+  transition: stroke-width 0.1s ease;
+}
+
+.svg-string.is-plucked .svg-string-visual,
+.svg-string.is-active-live .svg-string-visual,
+.svg-string.is-active-song .svg-string-visual {
+  stroke-width: 4.5;
+}
+
+.svg-string-label {
+  font-size: 11px;
+  fill: var(--walnut);
+  font-family: var(--sans);
+}
+
+/* ---------------------------------------------------------------------
+   Buttons — quiet, wood-and-brass, not a game HUD
+--------------------------------------------------------------------- */
+
+button {
+  font-family: var(--sans);
+  font-size: 0.85rem;
+  border: 1px solid var(--paper-line);
+  background: linear-gradient(180deg, #fbf5e7, #efe2c6);
+  color: var(--walnut-dark);
+  border-radius: 8px;
+  padding: 0.5rem 0.85rem;
+  min-height: 44px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+button:hover {
+  background: linear-gradient(180deg, #fffaf0, #f2e6c8);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button[aria-pressed="true"] {
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  color: #2e2015;
+}
+
+.button-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* ---------------------------------------------------------------------
+   Controls panel
+--------------------------------------------------------------------- */
+
+.controls-panel section + section {
+  margin-top: 1.5rem;
+}
+
+.controls-panel h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.key-buttons {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.key-button {
+  --string-color: #e9ddc0;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.4rem 0.2rem;
+  min-height: 44px;
+  border-top: 3px solid var(--string-color);
+}
+
+.key-button .key-label {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.key-button .note-label {
+  font-size: 0.65rem;
+  opacity: 0.75;
+}
+
+.key-button.is-active-live {
+  animation: key-flash-live 0.35s ease;
+}
+
+.key-button.is-active-song {
+  animation: key-flash-song 0.35s ease;
+}
+
+@keyframes key-flash-live {
+  0% {
+    background: var(--burgundy);
+    color: #fff4e2;
+  }
+
+  100% {
+    background: linear-gradient(180deg, #fbf5e7, #efe2c6);
+    color: var(--walnut-dark);
+  }
+}
+
+@keyframes key-flash-song {
+  0% {
+    background: var(--gold-bright);
+    color: #2e2015;
+  }
+
+  100% {
+    background: linear-gradient(180deg, #fbf5e7, #efe2c6);
+    color: var(--walnut-dark);
+  }
+}
+
+.volume-controls label {
+  display: block;
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+}
+
+.volume-controls input[type="range"] {
+  width: 100%;
+  margin-bottom: 0.6rem;
+  accent-color: var(--gold);
+}
+
+.song-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+}
+
+.song-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.song-progress {
+  margin-top: 0.6rem;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--parchment-dim);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--paper-line);
+}
+
+.song-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--gold), var(--burgundy));
+  transition: width 0.1s linear;
+}
+
+/* ---------------------------------------------------------------------
+   Ripple feedback
+--------------------------------------------------------------------- */
+
+.ripple-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.ripple {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  border-radius: 50%;
+  animation: ripple-out 0.8s ease-out forwards;
+}
+
+.ripple-live {
+  background: radial-gradient(circle, rgb(205 165 74 / 55%), rgb(109 37 50 / 35%) 60%, transparent 70%);
+}
+
+.ripple-song {
+  background: radial-gradient(circle, rgb(205 165 74 / 35%), transparent 70%);
+}
+
+@keyframes ripple-out {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.85;
+  }
+
+  100% {
+    transform: scale(5.5);
+    opacity: 0;
+  }
+}
+
+body.reduced-motion .ripple {
+  animation-duration: 0.4s;
+}
+
+body.reduced-motion .ripple-live,
+body.reduced-motion .ripple-song {
+  background: radial-gradient(circle, rgb(205 165 74 / 55%), transparent 65%);
+}
+
+/* ---------------------------------------------------------------------
+   Scroll hint
+--------------------------------------------------------------------- */
+
+.scroll-hint {
+  display: block;
+  text-align: center;
+  margin: 1.5rem auto 0;
+  font-family: var(--serif);
+  font-size: 0.9rem;
+  color: var(--walnut);
+  text-decoration: none;
+  opacity: 0.75;
+  animation: hint-breathe 3.5s ease-in-out infinite;
+}
+
+@keyframes hint-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+
+  50% {
+    opacity: 0.95;
+  }
+}
+
+body.reduced-motion .scroll-hint {
+  animation: none;
+  opacity: 0.75;
+}
+
+/* ---------------------------------------------------------------------
+   Culture section
+--------------------------------------------------------------------- */
+
+.culture {
+  position: relative;
+  z-index: 1;
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 5rem;
+}
+
+.culture h2 {
+  font-size: 1.7rem;
+  border-bottom: 1px solid var(--paper-line);
+  padding-bottom: 0.5rem;
+}
+
+.culture h3 {
+  font-size: 1.15rem;
+  margin-top: 2rem;
+}
+
+.culture p {
+  font-size: 0.98rem;
+}
+
+.back-to-harp {
+  display: block;
+  margin: 2.5rem auto 0.5rem;
+}
+
+.sources {
+  font-size: 0.85rem;
+  padding-left: 1.2rem;
+  opacity: 0.9;
+}
+
+.sources li {
+  margin-bottom: 0.35rem;
+}
+
+/* ---------------------------------------------------------------------
+   Responsive: mobile switches to a harp-first vertical layout
+--------------------------------------------------------------------- */
+
+@media (width <= 860px) {
+  .hero {
+    padding-top: 1rem;
+    min-height: auto;
+  }
+
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .instructions-panel {
+    order: 1;
+    padding-top: 0;
+    text-align: center;
+  }
+
+  .hint {
+    max-width: none;
+    margin: 0 auto;
+  }
+
+  .harp-stage {
+    order: 2;
+    aspect-ratio: 3 / 4;
+    max-height: 65vh;
+  }
+
+  .controls-panel {
+    order: 3;
+  }
+
+  .key-buttons {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
 }
