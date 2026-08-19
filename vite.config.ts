@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { defineConfig } from "vite";
@@ -25,5 +26,10 @@ export default defineConfig({
     rollupOptions: {
       input: htmlEntries(),
     },
+  },
+  // e2e/ holds Playwright specs, not Vitest ones — Vitest's default include
+  // pattern would otherwise try (and fail) to run them as unit tests too.
+  test: {
+    exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"],
   },
 });
