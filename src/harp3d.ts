@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { STRINGS, type HarpString } from "./strings";
 
 export interface PluckGesture {
@@ -16,37 +17,6 @@ export interface Harp3DHandle {
   flashString(stringId: string, intensity: number): void;
   setReducedMotion(reduced: boolean): void;
   setRunning(running: boolean): void;
-}
-
-const WOOD = 0x5b3a29;
-const WOOD_DARK = 0x3d2718;
-const BRASS = 0xb08d57;
-
-/** A subtle painted-on grain so the wood isn't a flat, plasticky colour. */
-function createWoodGrainTexture(): THREE.CanvasTexture {
-  const size = 128;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  if (ctx) {
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, size, size);
-    for (let i = 0; i < 46; i++) {
-      const x = Math.random() * size;
-      ctx.strokeStyle = `rgba(20,12,5,${(0.08 + Math.random() * 0.22).toFixed(3)})`;
-      ctx.lineWidth = 0.5 + Math.random() * 1.8;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x + (Math.random() - 0.5) * 10, size);
-      ctx.stroke();
-    }
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 5);
-  return texture;
 }
 
 /** A soft warm glow under the harp so it reads as standing on a lit floor, not floating in a void. */
@@ -134,99 +104,51 @@ export function mountHarp3D(
   scene.add(harpGroup);
   harpGroup.add(createGroundGlow());
 
-  const grain = createWoodGrainTexture();
-  const woodMat = new THREE.MeshStandardMaterial({ color: WOOD, roughness: 0.6, metalness: 0.04, map: grain });
-  const woodDarkMat = new THREE.MeshStandardMaterial({ color: WOOD_DARK, roughness: 0.55, metalness: 0.04, map: grain });
+  // The harp's wooden body is a real scanned/modelled asset (asset/harp/),
+  // copied into public/models/harp/ and loaded async — it has no separate
+  // string geometry (the strings are baked into its texture), so the 14
+  // interactive strings below remain a procedural overlay positioned onto
+  // its neck and soundboard. Scale/position are fixed constants derived
+  // once from the loaded model's own bounding box (measured via a throwaway
+  // preview harness), rather than recomputed at runtime, so the string
+  // anchors below (measured against that same transform) always line up.
+  const MODEL_SCALE = 5.3;
+  const MODEL_OFFSET = new THREE.Vector3(0.19, -1.55, 0);
+  new GLTFLoader().load(
+    `${import.meta.env.BASE_URL}models/harp/Unity2Skfb.gltf`,
+    (gltf) => {
+      gltf.scene.rotation.y = Math.PI / 2;
+      gltf.scene.scale.setScalar(MODEL_SCALE);
+      gltf.scene.position.copy(MODEL_OFFSET);
+      harpGroup.add(gltf.scene);
+    },
+    undefined,
+    (err) => {
+      console.warn("3D harp model failed to load — strings will render without a visible frame.", err);
+    },
+  );
 
-  // Soundbox: a tapered, gently-bellied box standing upright, wide at the
-  // base and narrow at the top, like a real harp's soundboard profile.
-  const boxShape = new THREE.Shape();
-  boxShape.moveTo(-0.38, 0);
-  boxShape.bezierCurveTo(-0.52, 0.6, -0.34, 1.7, -0.22, 2.6);
-  boxShape.lineTo(0.22, 2.6);
-  boxShape.bezierCurveTo(0.34, 1.7, 0.52, 0.6, 0.38, 0);
-  boxShape.closePath();
-  const boxGeo = new THREE.ExtrudeGeometry(boxShape, { depth: 0.5, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 3, curveSegments: 16 });
-  // Taper the resonating chamber's depth — deep at the base, shallow near the
-  // neck — instead of a uniform-depth slab. The front face (local z = 0.5,
-  // the one the strings attach to) is held fixed at every height; only the
-  // back face is pulled forward, so this can't open a gap under the strings.
-  const boxPos = boxGeo.attributes.position;
-  for (let i = 0; i < boxPos.count; i++) {
-    const y = boxPos.getY(i);
-    const depthScale = 1 - (Math.min(Math.max(y, 0), 2.6) / 2.6) * 0.55;
-    boxPos.setZ(i, 0.5 - (0.5 - boxPos.getZ(i)) * depthScale);
-  }
-  boxPos.needsUpdate = true;
-  boxGeo.computeVertexNormals();
-  const soundbox = new THREE.Mesh(boxGeo, woodMat);
-  soundbox.position.set(0.55, -1.3, -0.25);
-  soundbox.rotation.y = -0.08;
-  harpGroup.add(soundbox);
+  // Strings: attach along the neck (top) and the soundboard front (bottom).
+  // Anchor points are fixed world-space estimates (bass/treble ends of each
+  // edge, in the same transformed space as the model above), bass (low t)
+  // near the tall pillar side, treble (high t) near the short side. A small
+  // sine bulge on the neck line approximates its real upward arc, since the
+  // model has no exposed curve to sample the way the old procedural neck did.
+  const NECK_BASS = new THREE.Vector3(-0.34, 1.42, 0.27);
+  const NECK_TREBLE = new THREE.Vector3(0.83, 0.68, 0.27);
+  const BOX_BASS = new THREE.Vector3(0.08, -1.29, 0.48);
+  const BOX_TREBLE = new THREE.Vector3(0.83, 0.57, 0.48);
+  const NECK_BULGE = 0.18;
 
-  // Neck: a gentle S-curve from the top of the soundbox to the pillar top.
-  const neckCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0.55, 1.3, 0),
-    new THREE.Vector3(0.1, 1.75, 0.1),
-    new THREE.Vector3(-0.55, 1.95, 0.15),
-    new THREE.Vector3(-1.35, 1.7, 0.1),
-  ]);
-  const neck = new THREE.Mesh(new THREE.TubeGeometry(neckCurve, 32, 0.09, 14, false), woodDarkMat);
-  harpGroup.add(neck);
-
-  // Forepillar: from the base up to the neck's far end — the last control
-  // point matches the neck curve's endpoint exactly, so the two tubes meet
-  // with no visible gap or kink (the brass cap below then hides the seam).
-  const pillarCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-1.4, -1.55, 0.3),
-    new THREE.Vector3(-1.5, 0, 0.2),
-    new THREE.Vector3(-1.35, 1.7, 0.1),
-  ]);
-  const pillar = new THREE.Mesh(new THREE.TubeGeometry(pillarCurve, 24, 0.1, 14, false), woodMat);
-  harpGroup.add(pillar);
-
-  // Base plinth, sized and positioned to actually overlap both the
-  // soundbox's bottom and the pillar's foot (rather than leaving a gap
-  // under either), so it reads as one joined body.
-  const base = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.5, 0.6), woodDarkMat);
-  base.position.set(-0.3, -1.5, 0.05);
-  harpGroup.add(base);
-
-  // Brass cap over the neck/pillar joint, and two rings banding the pillar,
-  // each oriented to the pillar's own tangent at that point so they wrap
-  // cleanly around the curved tube instead of cutting through it at an angle.
-  const brassMat = new THREE.MeshStandardMaterial({ color: BRASS, roughness: 0.3, metalness: 0.75 });
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 12), brassMat);
-  cap.position.copy(neckCurve.getPoint(1));
-  harpGroup.add(cap);
-  const ringAxis = new THREE.Vector3(0, 0, 1);
-  for (const t of [0.15, 0.85]) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 10, 24), brassMat);
-    ring.position.copy(pillarCurve.getPoint(t));
-    ring.quaternion.setFromUnitVectors(ringAxis, pillarCurve.getTangent(t));
-    harpGroup.add(ring);
-  }
-
-  // Strings: attach along the neck (top) and the soundbox front (bottom),
-  // bass (low index) near the pillar/tall side, treble near the short side.
   const strings: StringMesh[] = [];
   const stringGroup = new THREE.Group();
   harpGroup.add(stringGroup);
 
   for (const config of STRINGS) {
     const t = config.position; // 0 (bass) .. 1 (treble)
-    // The neck point is the tube's centreline, so pull the attachment down
-    // and slightly forward, off the tube's surface — otherwise the string's
-    // top end would render buried inside the wood.
-    const topPoint = neckCurve.getPoint(0.08 + t * 0.86).add(new THREE.Vector3(0, -0.12, 0.16));
-    // Runs almost the full height of the soundbox's front face, near its
-    // centreline (which the box's taper keeps within the surface at every
-    // height) — bass strings (t=0) attach low and are long, treble (t=1)
-    // attach high near the neck and are short, same as a real harp. z sits
-    // just outside the box's camera-facing surface (local z = depth, world
-    // 0.25) — attaching to the far face instead would let the box's own
-    // solid volume occlude most of each string's length.
-    const bottomPoint = new THREE.Vector3(0.55, -1.15 + t * 2.2, 0.27);
+    const topPoint = NECK_BASS.clone().lerp(NECK_TREBLE, t);
+    topPoint.y += Math.sin(t * Math.PI) * NECK_BULGE;
+    const bottomPoint = BOX_BASS.clone().lerp(BOX_TREBLE, t);
     const length = topPoint.distanceTo(bottomPoint);
     const radiusVisual = 0.012 - t * 0.005;
 
