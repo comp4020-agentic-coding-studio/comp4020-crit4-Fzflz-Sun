@@ -51,20 +51,123 @@ const MAX_RADIUS = 7.5;
 const DEFAULT_AZIMUTH = 0.35;
 const DEFAULT_POLAR = Math.PI * 0.46;
 const DEFAULT_RADIUS = 5.2;
+const FLASH_DURATION_MS = 320; // within the 250-400ms fade window
 
 interface StringMesh {
   config: HarpString;
-  visual: THREE.Mesh;
   hit: THREE.Mesh;
-  baseScaleX: number;
-  vibration: number; // 0..1, decays each frame
+  highlight: THREE.Mesh;
+  /** Endpoints in the loaded "Harp" mesh's own local space (see stringsParent below). */
   top: THREE.Vector3;
   bottom: THREE.Vector3;
+  flashStart: number | null;
+  peakOpacity: number;
+}
+
+// --- Locating the real strings inside the loaded model ---------------------
+// The "Harp" mesh in public/models/harp/Unity2Skfb.gltf merges the wooden
+// body AND 35 real string strands into one indexed BufferGeometry — there is
+// no separate node/name per string, so the only way to find them is fixed
+// vertex/index offsets read directly out of that geometry. These offsets are
+// facts about this ONE exported asset (public/models/harp/Unity2Skfb.bin,
+// sha256 d8d9f2a4a2c13c3a91f130865e5b2cc22764e18c67f8e78730316e9e31609331) —
+// they are not a general glTF convention, so a validation guard below refuses
+// to use them (rather than guess) if the loaded geometry doesn't match.
+const HARP_MESH_NAME = "Harp";
+const EXPECTED_POSITION_COUNT = 12517;
+const EXPECTED_INDEX_COUNT = 29964;
+const STRING_COUNT = 35;
+const STRING_VERTS_PER_STRING = 15;
+const STRING_VERTEX_BASE = 1762; // vertex i of string s is at STRING_VERTEX_BASE + 15*s + i
+
+// The 14 notes in STRINGS run bass(0)..treble(13), but physical string index
+// runs the other way — measured directly from the vertex buffer, physical
+// index 0 spans the shortest length (~0.046 local units, a treble string) and
+// index 34 the longest (~0.547, a bass string, base-to-neck). So picking a
+// representative physical string per logical note needs the mapping run in
+// reverse from a naive round(i * 34 / 13).
+const REPRESENTATIVE_PHYSICAL_INDEX = STRINGS.map(
+  (_, i) => STRING_COUNT - 1 - Math.round((i * (STRING_COUNT - 1)) / (STRINGS.length - 1)),
+);
+
+interface StringSpan {
+  top: THREE.Vector3;
+  bottom: THREE.Vector3;
+  length: number;
+  radius: number;
 }
 
 /**
- * Builds the 3D harp. Throws if WebGL is unavailable — callers should catch
- * and fall back to the SVG harp (see src/svgHarp.ts).
+ * Reads one physical string's 15 raw local-space vertices and reduces them to
+ * a center axis, two endpoints, and a thickness estimate. Each string's 15
+ * vertices form three y-clusters (an end-cap detail at one tip), not a clean
+ * two-ended split, so this uses PCA (via power iteration, seeded with "up"
+ * since strings run roughly vertical) to find the long axis, then 1D k-means
+ * (k=2) on the projected values to correctly group the vertices into the two
+ * true endpoints.
+ */
+function computeStringSpan(positionAttr: THREE.BufferAttribute, physicalIndex: number): StringSpan {
+  const base = STRING_VERTEX_BASE + STRING_VERTS_PER_STRING * physicalIndex;
+  const verts: THREE.Vector3[] = [];
+  for (let k = 0; k < STRING_VERTS_PER_STRING; k++) {
+    verts.push(new THREE.Vector3(positionAttr.getX(base + k), positionAttr.getY(base + k), positionAttr.getZ(base + k)));
+  }
+  const centroid = verts.reduce((acc, v) => acc.add(v), new THREE.Vector3()).multiplyScalar(1 / verts.length);
+
+  let cxx = 0, cxy = 0, cxz = 0, cyy = 0, cyz = 0, czz = 0;
+  for (const v of verts) {
+    const dx = v.x - centroid.x, dy = v.y - centroid.y, dz = v.z - centroid.z;
+    cxx += dx * dx; cxy += dx * dy; cxz += dx * dz;
+    cyy += dy * dy; cyz += dy * dz; czz += dz * dz;
+  }
+  let axis = new THREE.Vector3(0, 1, 0);
+  for (let iter = 0; iter < 25; iter++) {
+    const next = new THREE.Vector3(
+      cxx * axis.x + cxy * axis.y + cxz * axis.z,
+      cxy * axis.x + cyy * axis.y + cyz * axis.z,
+      cxz * axis.x + cyz * axis.y + czz * axis.z,
+    );
+    if (next.lengthSq() < 1e-20) break;
+    axis = next.normalize();
+  }
+
+  const projections = verts.map(
+    (v) => (v.x - centroid.x) * axis.x + (v.y - centroid.y) * axis.y + (v.z - centroid.z) * axis.z,
+  );
+  let c1 = Math.min(...projections);
+  let c2 = Math.max(...projections);
+  for (let iter = 0; iter < 20; iter++) {
+    let sum1 = 0, n1 = 0, sum2 = 0, n2 = 0;
+    for (const p of projections) {
+      if (Math.abs(p - c1) <= Math.abs(p - c2)) { sum1 += p; n1++; } else { sum2 += p; n2++; }
+    }
+    if (n1) c1 = sum1 / n1;
+    if (n2) c2 = sum2 / n2;
+  }
+
+  const groupA: THREE.Vector3[] = [];
+  const groupB: THREE.Vector3[] = [];
+  let maxPerp = 0;
+  for (let k = 0; k < verts.length; k++) {
+    const p = projections[k];
+    (Math.abs(p - c1) <= Math.abs(p - c2) ? groupA : groupB).push(verts[k]);
+    const d = verts[k].clone().sub(centroid);
+    const along = d.dot(axis);
+    const perp = d.clone().sub(axis.clone().multiplyScalar(along)).length();
+    if (perp > maxPerp) maxPerp = perp;
+  }
+  const avg = (arr: THREE.Vector3[]) =>
+    arr.length ? arr.reduce((acc, v) => acc.add(v), new THREE.Vector3()).multiplyScalar(1 / arr.length) : centroid.clone();
+  const endA = avg(groupA);
+  const endB = avg(groupB);
+  const top = endA.y >= endB.y ? endA : endB;
+  const bottom = endA.y >= endB.y ? endB : endA;
+  return { top, bottom, length: top.distanceTo(bottom), radius: maxPerp };
+}
+
+/**
+ * Builds this instrument's mode: throws if WebGL is unavailable — callers
+ * should catch and fall back to the SVG harp (see src/svgHarp.ts).
  */
 export function mountHarp3D(
   container: HTMLElement,
@@ -103,85 +206,16 @@ export function mountHarp3D(
   const harpGroup = new THREE.Group();
   scene.add(harpGroup);
   harpGroup.add(createGroundGlow());
-
-  // The harp's wooden body is a real scanned/modelled asset (asset/harp/),
-  // copied into public/models/harp/ and loaded async — it has no separate
-  // string geometry (the strings are baked into its texture), so the 14
-  // interactive strings below remain a procedural overlay positioned onto
-  // its neck and soundboard. Scale/position are fixed constants derived
-  // once from the loaded model's own bounding box (measured via a throwaway
-  // preview harness), rather than recomputed at runtime, so the string
-  // anchors below (measured against that same transform) always line up.
-  const MODEL_SCALE = 5.3;
-  const MODEL_OFFSET = new THREE.Vector3(0.19, -1.55, 0);
-  new GLTFLoader().load(
-    `${import.meta.env.BASE_URL}models/harp/Unity2Skfb.gltf`,
-    (gltf) => {
-      gltf.scene.rotation.y = Math.PI / 2;
-      gltf.scene.scale.setScalar(MODEL_SCALE);
-      gltf.scene.position.copy(MODEL_OFFSET);
-      harpGroup.add(gltf.scene);
-    },
-    undefined,
-    (err) => {
-      console.warn("3D harp model failed to load — strings will render without a visible frame.", err);
-    },
-  );
-
-  // Strings: attach along the neck (top) and the soundboard front (bottom).
-  // Anchor points are fixed world-space estimates (bass/treble ends of each
-  // edge, in the same transformed space as the model above), bass (low t)
-  // near the tall pillar side, treble (high t) near the short side. A small
-  // sine bulge on the neck line approximates its real upward arc, since the
-  // model has no exposed curve to sample the way the old procedural neck did.
-  const NECK_BASS = new THREE.Vector3(-0.34, 1.42, 0.27);
-  const NECK_TREBLE = new THREE.Vector3(0.83, 0.68, 0.27);
-  const BOX_BASS = new THREE.Vector3(0.08, -1.29, 0.48);
-  const BOX_TREBLE = new THREE.Vector3(0.83, 0.57, 0.48);
-  const NECK_BULGE = 0.18;
-
-  const strings: StringMesh[] = [];
-  const stringGroup = new THREE.Group();
-  harpGroup.add(stringGroup);
-
-  for (const config of STRINGS) {
-    const t = config.position; // 0 (bass) .. 1 (treble)
-    const topPoint = NECK_BASS.clone().lerp(NECK_TREBLE, t);
-    topPoint.y += Math.sin(t * Math.PI) * NECK_BULGE;
-    const bottomPoint = BOX_BASS.clone().lerp(BOX_TREBLE, t);
-    const length = topPoint.distanceTo(bottomPoint);
-    const radiusVisual = 0.012 - t * 0.005;
-
-    const visualGeo = new THREE.CylinderGeometry(radiusVisual, radiusVisual, length, 6);
-    const visual = new THREE.Mesh(
-      visualGeo,
-      new THREE.MeshStandardMaterial({ color: config.color, roughness: 0.35, metalness: 0.15 }),
-    );
-    orientBetween(visual, topPoint, bottomPoint);
-    stringGroup.add(visual);
-
-    // A much wider, invisible cylinder so fingers/thumbs can hit it easily.
-    const hitGeo = new THREE.CylinderGeometry(0.055, 0.055, length, 6);
-    const hit = new THREE.Mesh(
-      hitGeo,
-      new THREE.MeshBasicMaterial({ color: config.color, transparent: true, opacity: 0, depthWrite: false }),
-    );
-    hit.userData.stringId = config.id;
-    orientBetween(hit, topPoint, bottomPoint);
-    stringGroup.add(hit);
-
-    strings.push({
-      config,
-      visual,
-      hit,
-      baseScaleX: 1,
-      vibration: 0,
-      top: topPoint,
-      bottom: bottomPoint,
-    });
-  }
-
   harpGroup.position.set(0.35, 0, 0);
+
+  // --- Interactive strings: populated once the model has loaded and its
+  // "Harp" mesh geometry has been validated (see buildStringOverlay below).
+  // Kept as a plain mutable array (not derived via strings.map() up front)
+  // so pointer handling below always reads whatever is currently in it,
+  // including "still empty because the model hasn't loaded yet" — keyboard
+  // plucks never touch this at all, so they keep working regardless.
+  const strings: StringMesh[] = [];
+  let stringsParent: THREE.Object3D | null = null;
 
   function orientBetween(mesh: THREE.Mesh, a: THREE.Vector3, b: THREE.Vector3): void {
     const mid = a.clone().add(b).multiplyScalar(0.5);
@@ -191,6 +225,116 @@ export function mountHarp3D(
     const quat = new THREE.Quaternion().setFromUnitVectors(up, dir);
     mesh.quaternion.copy(quat);
   }
+
+  /**
+   * Creates the 14 representative strings' hit/highlight proxies as children
+   * of the real "Harp" mesh, so they automatically inherit its transform
+   * (the model's own rotation/scale/position below) with no separate
+   * world-space alignment needed.
+   */
+  function buildStringOverlay(harpMesh: THREE.Mesh): void {
+    const positionAttr = harpMesh.geometry.attributes.position as THREE.BufferAttribute;
+    const spans = REPRESENTATIVE_PHYSICAL_INDEX.map((physicalIndex) => computeStringSpan(positionAttr, physicalIndex));
+
+    // Sanity check only — not a hard gate (the mesh-shape guard at the call
+    // site is the hard gate). Bass (STRINGS[0]) should be the longest
+    // representative string and treble (STRINGS[13]) the shortest.
+    for (let i = 1; i < spans.length; i++) {
+      if (spans[i].length > spans[i - 1].length + 1e-4) {
+        console.warn(
+          "3D harp: representative string lengths are not monotonically decreasing bass→treble " +
+            `(index ${i - 1}: ${spans[i - 1].length.toFixed(4)}, index ${i}: ${spans[i].length.toFixed(4)}) — ` +
+            "the 35→14 mapping may no longer match this asset.",
+        );
+        break;
+      }
+    }
+
+    stringsParent = harpMesh;
+
+    // Size each hit proxy from how far it sits from its neighbours (in the
+    // representative set), so intervening decorative strings stay clickable
+    // without leaving dead zones between logical strings.
+    const mids = spans.map((s) => s.top.clone().add(s.bottom).multiplyScalar(0.5));
+    const HIT_MIN = 0.006;
+    const HIT_MAX = 0.022;
+
+    STRINGS.forEach((config, i) => {
+      const span = spans[i];
+      const neighbourDists: number[] = [];
+      if (i > 0) neighbourDists.push(mids[i].distanceTo(mids[i - 1]));
+      if (i < spans.length - 1) neighbourDists.push(mids[i].distanceTo(mids[i + 1]));
+      const nearest = neighbourDists.length ? Math.min(...neighbourDists) : HIT_MAX;
+      const hitRadius = Math.min(HIT_MAX, Math.max(HIT_MIN, nearest * 0.6));
+      const highlightRadius = Math.max(0.0015, span.radius * 1.35);
+
+      const hit = new THREE.Mesh(
+        new THREE.CylinderGeometry(hitRadius, hitRadius, span.length, 8),
+        new THREE.MeshBasicMaterial({ color: config.color, transparent: true, opacity: 0, depthWrite: false }),
+      );
+      hit.userData.stringId = config.id;
+      orientBetween(hit, span.top, span.bottom);
+      harpMesh.add(hit);
+
+      // Idle-hidden: only shown, briefly, while its string is ringing.
+      const highlight = new THREE.Mesh(
+        new THREE.CylinderGeometry(highlightRadius, highlightRadius, span.length, 6),
+        new THREE.MeshBasicMaterial({
+          color: config.color,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          depthTest: true,
+        }),
+      );
+      highlight.visible = false;
+      orientBetween(highlight, span.top, span.bottom);
+      harpMesh.add(highlight);
+
+      strings.push({ config, hit, highlight, top: span.top, bottom: span.bottom, flashStart: null, peakOpacity: 0.85 });
+    });
+
+    harpMesh.updateMatrixWorld(true);
+  }
+
+  // The harp's wooden body — and its 35 real strings, merged into the same
+  // mesh geometry as the body with no separate node per string — is a real
+  // modelled asset (asset/harp/), copied into public/models/harp/ and loaded
+  // async. Scale/position are fixed constants derived once from the loaded
+  // model's own bounding box (measured via a throwaway preview harness).
+  const MODEL_SCALE = 5.3;
+  const MODEL_OFFSET = new THREE.Vector3(0.19, -1.55, 0);
+  new GLTFLoader().load(
+    `${import.meta.env.BASE_URL}models/harp/Unity2Skfb.gltf`,
+    (gltf) => {
+      gltf.scene.rotation.y = Math.PI / 2;
+      gltf.scene.scale.setScalar(MODEL_SCALE);
+      gltf.scene.position.copy(MODEL_OFFSET);
+      harpGroup.add(gltf.scene);
+
+      const harpMesh = gltf.scene.getObjectByName(HARP_MESH_NAME);
+      const geometry = harpMesh instanceof THREE.Mesh ? harpMesh.geometry : null;
+      const positionAttr = geometry?.attributes.position;
+      const indexAttr = geometry?.index ?? null;
+      if (
+        harpMesh instanceof THREE.Mesh &&
+        positionAttr?.count === EXPECTED_POSITION_COUNT &&
+        indexAttr?.count === EXPECTED_INDEX_COUNT
+      ) {
+        buildStringOverlay(harpMesh);
+      } else {
+        console.warn(
+          `3D harp: could not find a "${HARP_MESH_NAME}" mesh matching the geometry this build's ` +
+            "string-locating offsets are calibrated to (vertex/index counts differ from the pinned asset) " +
+            "— showing the model without interactive strings rather than guessing anchor points.",
+        );
+      }
+    },
+    undefined,
+    (err) => {
+      console.warn("3D harp model failed to load — strings will render without a visible frame.", err);
+    },
+  );
 
   function updateCamera(): void {
     const clampedPolar = Math.min(MAX_POLAR, Math.max(MIN_POLAR, polar));
@@ -220,14 +364,17 @@ export function mountHarp3D(
   const raycaster = new THREE.Raycaster();
   raycaster.params.Mesh = { threshold: 0.02 };
   const pointer = new THREE.Vector2();
-  const hitMeshes = strings.map((s) => s.hit);
 
   function pickString(clientX: number, clientY: number): { mesh: StringMesh; point: THREE.Vector3 } | null {
+    if (strings.length === 0) return null;
     const rect = renderer.domElement.getBoundingClientRect();
     pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
-    const hits = raycaster.intersectObjects(hitMeshes, false);
+    const hits = raycaster.intersectObjects(
+      strings.map((s) => s.hit),
+      false,
+    );
     if (hits.length === 0) return null;
     const mesh = strings.find((s) => s.hit === hits[0].object);
     if (!mesh) return null;
@@ -251,8 +398,12 @@ export function mountHarp3D(
     clientX: number,
     clientY: number,
   ): void {
-    const along = mesh.top.distanceTo(point) / mesh.top.distanceTo(mesh.bottom);
-    mesh.vibration = Math.min(1, intensity + 0.3);
+    // The raycaster returns world-space hit points; the string endpoints are
+    // stored in the "Harp" mesh's own local space, so the hit point must be
+    // converted back into that same local frame before comparing distances.
+    const localPoint = stringsParent ? stringsParent.worldToLocal(point.clone()) : point.clone();
+    const totalLength = mesh.top.distanceTo(mesh.bottom);
+    const along = totalLength > 0 ? mesh.top.distanceTo(localPoint) / totalLength : 0.5;
     onPluck({
       stringId: mesh.config.id,
       intensity: Math.min(1, Math.max(0.15, intensity)),
@@ -343,7 +494,7 @@ export function mountHarp3D(
   renderer.domElement.addEventListener("pointercancel", onPointerUp);
   renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
 
-  // --- Render loop, with a vibration decay and pause support.
+  // --- Render loop: reset-view animation and the pluck highlight fade.
   let running = true;
   let reducedMotion = false;
   let resetAnimation: { fromAz: number; fromPolar: number; fromRadius: number; start: number } | null = null;
@@ -363,16 +514,20 @@ export function mountHarp3D(
       if (p >= 1) resetAnimation = null;
     }
 
-    const decay = reducedMotion ? 0.35 : 0.14;
+    const motionScale = reducedMotion ? 0.7 : 1;
+    const now = performance.now();
     for (const s of strings) {
-      if (s.vibration > 0.001) {
-        s.vibration *= decay ** (1 / 60);
-        const wobble = Math.sin(performance.now() * 0.09) * s.vibration * (reducedMotion ? 0.4 : 1);
-        s.visual.position.x = s.top.x + (s.bottom.x - s.top.x) / 2 + wobble * 0.03;
-      } else if (s.vibration !== 0) {
-        s.vibration = 0;
-        s.visual.position.x = (s.top.x + s.bottom.x) / 2;
+      if (s.flashStart === null) continue;
+      const elapsed = now - s.flashStart;
+      const material = s.highlight.material as THREE.MeshBasicMaterial;
+      if (elapsed >= FLASH_DURATION_MS) {
+        s.flashStart = null;
+        s.highlight.visible = false;
+        material.opacity = 0;
+        continue;
       }
+      const fade = 1 - elapsed / FLASH_DURATION_MS;
+      material.opacity = s.peakOpacity * motionScale * fade * fade;
     }
 
     renderer.render(scene, camera);
@@ -396,7 +551,10 @@ export function mountHarp3D(
     },
     flashString(stringId: string, intensity: number): void {
       const mesh = strings.find((s) => s.config.id === stringId);
-      if (mesh) mesh.vibration = Math.min(1, intensity + 0.3);
+      if (!mesh) return;
+      mesh.flashStart = performance.now();
+      mesh.peakOpacity = Math.min(1, Math.max(0.35, intensity));
+      mesh.highlight.visible = true;
     },
     setReducedMotion(reduced: boolean): void {
       reducedMotion = reduced;

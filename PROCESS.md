@@ -2,151 +2,74 @@
 
 ## What I built
 
-A playable harp: a real modelled 3D harp body with 14 individually addressable
-procedural strings overlaid on it, played live through native Web Audio
-synthesis — mouse, keyboard (`A S D F G H J` / `Q W E R T Y U`, `Space` to
-damp), or touch, with drag-glissando, pluck-position timbre, and three
-public-domain demo tunes scheduled against the audio clock rather than
-`setTimeout`. If WebGL isn't available it falls back to an inline SVG harp
-built from the same string data, so the instrument is never blank.
+I built a playable browser harp around one rule: every action should make a
+musical sound rather than produce a wrong answer. Fourteen notes can be played
+with mouse, keyboard, touch, or drag-glissando. Native Web Audio synthesises
+each pluck live, including intensity and pluck-position differences, while
+three public-domain melodies are scheduled through the same instrument rather
+than played as recordings. A rotatable modelled harp supplies the main visual.
+Its glTF contains 35 physical strings merged into the body geometry, so the
+interface reads 14 representative positions from that geometry for hit areas
+and temporary highlights. The same note data also drives the visible controls,
+demo songs, and an SVG fallback.
 
 ## The moments that mattered
 
-1. **One unified pluck pipeline, decided before any UI existed.**
-   Every input path — a keyboard key, a mouse click on a key-button, a 3D
-   raycast hit, a touch drag, a demo-song note — was designed from the start
-   to call the same `pluckString`-shaped function
-   ([`adeb46b`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/adeb46b)
-   for the synth side,
-   [`7a20d8a`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/7a20d8a)
-   for `main.ts`'s single `pluck()` entry point). The obvious alternative —
-   wiring the synth separately into the keyboard handler, the DOM buttons,
-   the 3D scene, and the song player — would have made "every sound event
-   fires the same visual feedback" (string flash, ripple, key-label
-   highlight) something to keep re-synchronising by hand instead of a
-   structural guarantee. I knew it held because `spec/crit-4.test.ts`'s data
-   contracts (every song note references a real string; every string has a
-   visible control) pass against the same `STRINGS`/`SONGS` modules that both
-   the 3D scene and the DOM read from — there's only one place either could
-   drift.
+### 1. Making every input path part of one instrument
 
-2. **The jsdom tests forced a real accessibility improvement, not a
-   workaround.** The 14 key-buttons were originally built at runtime with
-   `document.createElement` from `STRINGS`. Two spec tests failed against the
-   built `dist/index.html` because jsdom parses static HTML only — it never
-   executes `<script type="module">`, so the runtime-created buttons simply
-   didn't exist in the file the test inspected. The obvious fix would have
-   been to weaken the tests. Instead I moved the 14 buttons into static
-   markup in `index.html` and had `main.ts` only attach behaviour to
-   pre-existing elements
-   ([`7a20d8a`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/7a20d8a),
-   tests extended in
-   [`be3c007`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/be3c007)).
-   This is strictly better accessibility — real controls exist for a screen
-   reader or a WebGL-fallback consumer even before JS runs — not a
-   test-gaming shortcut. I knew it was right because `pnpm test` went from
-   33/35 to 35/35 without touching the assertions, and because the fix
-   matches the spec's own "real DOM note buttons as the accessible/touch/
-   screen-reader equivalent" requirement rather than routing around it.
+Keyboard presses, pointer and touch gestures, accessible note buttons, and
+scheduled songs all enter one pluck pipeline. Wiring each input separately
+would have let pitch, animation, and key labels drift apart, so `STRINGS`
+became their single source of truth and every sound dispatches the same visual
+event. Demo songs use the Web Audio clock rather than `setTimeout`, keeping
+them inside the live synthesiser instead of turning them into playback
+([`adeb46b...7a20d8a`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/compare/adeb46b...7a20d8a)).
+When jsdom could not see buttons created at runtime, I did not weaken the
+tests; I moved all 14 controls into static HTML, making the same instrument
+available before WebGL and to screen readers
+([`be3c007`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/be3c007)).
 
-3. **Diagnosing the missing Three.js types from the package itself, not
-   assumption.** `tsc --noEmit` failed with "could not find a declaration
-   file for module 'three'". Rather than silencing it with an `any`-typed
-   module shim, I inspected `three`'s own `package.json` and confirmed it
-   ships no `types` field, no `types` export condition, and no `.d.ts` files
-   anywhere in `build/` or `src/` — this version of Three.js genuinely ships
-   no bundled declarations. The correct, minimal fix was `@types/three` as a
-   dev dependency, which is what TypeScript's own error pointed at and
-   doesn't add a runtime dependency
-   ([`705bc81`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/705bc81)).
-   I knew it was resolved because `pnpm typecheck` went from one error to
-   silent.
+### 2. Letting the rendered object overrule plausible code
 
-4. **Rejecting a blanket `prefers-reduced-motion` override in favour of the
-   finer-grained one the spec actually asked for.** An early draft of
-   `styles.css` had a global
-   `@media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms
-   !important; ... } }` block — the common boilerplate pattern. I removed it
-   before it was ever committed, because its `!important` would have
-   defeated the JS-driven `body.reduced-motion` class rules that are meant
-   to *reduce* ripple/vibration magnitude while keeping feedback visible,
-   which is what the spec explicitly asks for ("reduce magnitude but keep
-   clear feedback"), not "turn all animation off." The final version relies
-   solely on the JS-set class
-   ([`7a20d8a`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/7a20d8a)).
-   Verified with a Playwright context set to `reducedMotion: 'reduce'`: the
-   class applies, and ripple elements still appear and fully clean up.
+The procedural harp looked reasonable in code but failed when viewed as an
+object: strings disappeared into the soundbox, endpoints floated, and the
+lighting flattened the frame. Adjusting the obvious coordinates was not
+enough. Screenshots from several orbit angles revealed that the strings were
+attached to the rear face while the camera viewed the front. Computing the
+camera and attachment points in world space exposed what a green typecheck
+could not; I changed the geometry and lighting, then repeated the screenshots
+([`43eba35`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/43eba35)).
+That episode established the most useful harness for this crit: tests protect
+contracts, but the rendered model and my ear remain evidence for appearance,
+latency, and feel.
 
-5. **Finding the string-occlusion bug required computing world-space
-   coordinates, not reading the code.** After feedback that the 3D model
-   looked wrong and had visible clipping, I fixed the obvious issues by
-   arithmetic first — string endpoints swept 1.55 units across x while the
-   soundbox is only ~0.7 units wide, so treble strings floated in empty
-   space; string tops sat exactly on the neck tube's centreline, which is
-   *inside* the tube's own radius. Both fixes looked complete on paper. A
-   screenshot showed otherwise: every string still visibly vanished partway
-   down before reaching the box. The cause wasn't in either fix — it was
-   that the string's bottom point attached to the soundbox's back
-   (`ExtrudeGeometry`'s local z = 0 face), while the default camera sits on
-   the box's *front* side, so the box's own solid volume sat between the
-   camera and most of each string. I only found this by computing the
-   camera's actual world position from its orbit angles and comparing it
-   against which of the box's two flat extrude faces points toward it —
-   reading `harp3d.ts` alone never would have surfaced it, because nothing
-   in the code is wrong in isolation; it's only wrong relative to which side
-   the camera happens to default to
-   ([`43eba35`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/43eba35)).
-   I confirmed it with Playwright screenshots at three orbit angles, actually
-   looking at the rendered PNGs rather than assuming the arithmetic fix was
-   sufficient — which is also how the flat-black-silhouette lighting issue
-   in the same commit was caught.
+### 3. Treating the imported model as data, not a picture
 
-6. **Being wrong about a constraint I'd invented, and checking rather than
-   arguing.** After the geometry/lighting fixes in
-   [`43eba35`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/43eba35),
-   feedback was that the procedural model still looked bad and I should use a
-   real 3D asset instead. I pushed back, telling the user the crit was meant
-   to be a procedural, no-imported-model instrument — but when asked directly
-   where that rule came from, I couldn't point to it. I grepped the whole repo
-   for "procedural" and read `spec/crit-4.test.ts` and the commit that added
-   it in full: the only real constraint is native Web Audio synthesis instead
-   of an `<audio>`/mp3 file, which is about sound, not geometry. The
-   "procedural-only" rule existed nowhere but my own framing from earlier in
-   the build. I said so, dropped the objection, and integrated the model the
-   user pointed at
-   ([`830a3a5`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/830a3a5)).
-   The remaining open question — whether this specific downloaded asset's
-   licence permits use in a repo that's about to go public — is still theirs
-   to confirm; I raised it but didn't block on it since they'd already
-   directed me twice to proceed.
+When feedback said the procedural frame was still unusable, I initially argued
+that imported models were outside the brief. Checking the published spec and
+the repository showed that I had invented that constraint: Web Audio governs
+the sound source, not the geometry. I dropped the objection and integrated the
+real asset
+([`830a3a5`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/830a3a5)),
+then corrected my earlier account rather than hiding the mistake
+([`8b8b488`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit4-Fzflz-Sun/commit/8b8b488)).
 
-## How this was actually organised
-
-The five commits above split the work by module/concern (audio+data, songs,
-3D+fallback, page+styles+wiring, tests) so each is reviewable as a real,
-non-trivial diff. It was not built as literal step-by-step TDD with each
-commit independently red-then-green in CI — it was one continuous
-implementation pass against the full spec, checked as a whole with
-`pnpm check` at the end, then organised into these commits after the fact. I'm
-stating that plainly rather than implying a false per-commit CI history.
+The first integration made a second bad assumption: because the glTF exposed
+only one named `Harp` mesh, I accepted that its strings were baked into the
+texture and left 14 thick procedural cylinders in front of it. A rotated view
+showed both sets at once. Inspecting the vertex and index buffers revealed 35
+real string strands merged into the same mesh as the frame. Rather than tune
+four more guessed endpoints, the correction validates this exact asset, reads
+the real string positions in model-local coordinates, and attaches invisible
+hit areas plus short-lived highlights to the same transform. If the asset no
+longer matches, it warns and preserves the model instead of silently guessing.
+<!-- Add the real implementation commit link to this paragraph after the
+     current src/harp3d.ts correction is committed; do not invent a SHA. -->
 
 ## What still needs a human
 
-Per the spec's own instruction, the following are **not** and cannot be
-verified by `pnpm test` (jsdom can't judge audio timbre or WebGL rendering
-quality) — they need your own ears and eyes:
-
-- Does the plucked timbre actually sound good, and does it feel expressive
-  (glissando, pluck-position brightness, chord voicing)?
-- Does the 3D harp look right, and does the rotate-vs-pluck gesture
-  disambiguation feel natural on your own trackpad/touchscreen?
-- A genuine ≥1 minute continuous play session, listening for stutter,
-  clipping, or the active-voice count silently growing over time. I ran an
-  automated 6-second/137-keypress stress test with zero console errors as a
-  smoke check, but that is not a substitute for a real listening pass.
-
-## Before you ship
-
-`pnpm check:evidence` verifies citations resolve to real commits and that a
-correctly named reflection file exists in `reflections/`. Run it, and open
-this file on GitHub to check it renders, before the repo goes public.
+Automated checks cannot decide whether the timbre feels harp-like or whether
+rotation and glissando feel natural. Before shipping, I still need to play it
+continuously with headphones and inspect the default, side, rear, and mobile
+views. Those checks should be reported as performed only after I have actually
+done them.
